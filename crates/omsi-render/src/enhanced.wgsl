@@ -1045,7 +1045,18 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     let cabin_light = interior_lamps(in.world, n, in.params2.z);
     let cabin = sf.albedo * cabin_light * mix(1.0, ao, 0.85);
     var rgb = (direct + ambient + lamps) * pre + cabin;
-    var emit = tex.rgb * material.emissive.rgb * max(enh.exposure.z * 2.0, 0.8);
+    // o3d emissive (cab monitors, painted boards). By day the 0.8 floor keeps the texture
+    // readable under the windscreen; at night exposure.z rises and the same multiply pushes
+    // light greys into the tone shoulder. From the driver's seat, cap at the photographic
+    // mid-tone for the current metering (`display_level` × exposure.y) — physics of the
+    // tone curve, not a fixed night scale. Exterior lamp lenses keep the raw path so they
+    // still bloom (they are not viewed as cab UI).
+    let e = material.emissive.rgb;
+    let raw_emit = tex.rgb * e * max(enh.exposure.z * 2.0, 0.8);
+    let photo_emit = display_level(tex.rgb * max(e, vec3<f32>(1e-4))) * enh.exposure.y;
+    let day_floor = tex.rgb * e * 0.8;
+    let from_cab = inside_vehicle(camera.cam_pos.xyz) * near_player_vehicle(in.world) > 0.5;
+    var emit = select(raw_emit, min(raw_emit, max(photo_emit, day_floor)), from_cab);
     // (the tile light map on the splines and [LightMapMapping] objects is the vanilla
     // path's: here the map's lamps light them, tinted from that map, as they light every
     // other surface - added on top it lit the roads twice, with a hard edge where a road
@@ -1066,7 +1077,14 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
             // (a window lit from inside shows some 80 cd/m² - a room's 300 lux off its
             // walls and through a curtain - an illuminated sign more: over the dark street
             // round it, well over the screen's white, and the eye's glare blooms round it)
-            emit = emit + nm * select(enh.exposure.z * 3.6, max(enh.exposure.z * 2.0, 0.8), switched);
+            // From inside the cab, switched night-map indicators use the same photographic
+            // mid-tone cap so they do not bloom over a dark dashboard; exterior night maps
+            // keep the raw night radiance.
+            let sw_raw = nm * max(enh.exposure.z * 2.0, 0.8);
+            let sw_photo = display_level(max(nm, vec3<f32>(1e-4))) * enh.exposure.y;
+            let sw_cab = min(sw_raw, max(sw_photo, nm * 0.8));
+            let sw = select(sw_raw, sw_cab, from_cab);
+            emit = emit + select(nm * enh.exposure.z * 3.6, sw, switched);
         }
     }
     if (material.params2.x > 0.5 && !terrain) {
@@ -1103,8 +1121,13 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         let lm_gate = select(1.0, clamp(in.params2.x, 0.0, 1.0), material.params2.x > 0.5);
         emit = emit + tex.rgb * enh.led.x * alpha * lm_gate * max(enh.exposure.z * 2.0, 0.8);
     } else if (material.emissive.w < -0.5) {
-        // a display's text (see MaterialExtra::display)
-        emit = emit + tex.rgb * 0.35 * max(enh.exposure.z * 2.0, 0.8);
+        // a display's text (see MaterialExtra::display). Cockpit screens
+        // (`MaterialExtra::screen`) stay under the photographic mid-tone; exterior route
+        // lettering keeps the raw night multiply.
+        let k = max(enh.exposure.z * 2.0, 0.8);
+        let lit = tex.rgb * 0.35 * k;
+        let photo = display_level(tex.rgb) * enh.exposure.y;
+        emit = emit + select(lit, min(lit, max(photo, tex.rgb * 0.35 * 0.8)), material.flags.x > 0.5);
     }
     rgb = rgb + emit;
     if (enh.debug.x > 0.5) {
