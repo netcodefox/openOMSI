@@ -107,30 +107,37 @@ fn synthetic_ibox_script() -> String {
 }
 
 fn compile_fixture() -> Program {
-    let dir = fixture_dir();
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("ibox.osc"), synthetic_ibox_script()).unwrap();
-    std::fs::write(
-        dir.join("v.txt"),
-        "ibox_taste_D1\nibox_taste_D2\nibox_taste_D3\nibox_taste_D4\nibox_taste_D5\n\
+    // One shared write+compile: parallel tests must not race on the same fixture files
+    // (CI saw `variable "ibox_taste_D1" not found` when `v.txt` was truncated mid-read).
+    static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
+    PROGRAM
+        .get_or_init(|| {
+            let dir = fixture_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("ibox.osc"), synthetic_ibox_script()).unwrap();
+            std::fs::write(
+                dir.join("v.txt"),
+                "ibox_taste_D1\nibox_taste_D2\nibox_taste_D3\nibox_taste_D4\nibox_taste_D5\n\
 ibox_taste_D6\nibox_taste_D7\nibox_taste_D8\nibox_taste_D9\n\
 ibox_taste_D10\nibox_taste_D11\nibox_eingabe\nibox_modus\nibox_Route\nIBIS_LinieKurs\nibox_routenindex\nibox_PIN\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join("s.txt"),
-        "ibox_Zahleingabe\nibox_StatuszeileMitte\nibox_StatuszeileRechts\nibox_delay\nibox_hstverlauf\n",
-    )
-    .unwrap();
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("s.txt"),
+                "ibox_Zahleingabe\nibox_StatuszeileMitte\nibox_StatuszeileRechts\nibox_delay\nibox_hstverlauf\n",
+            )
+            .unwrap();
 
-    let p = compile(&CompileInput {
-        varlists: vec![dir.join("v.txt")],
-        stringvarlists: vec![dir.join("s.txt")],
-        scripts: vec![dir.join("ibox.osc")],
-        ..Default::default()
-    });
-    assert!(p.errors.is_empty(), "{:?}", p.errors);
-    p
+            let p = compile(&CompileInput {
+                varlists: vec![dir.join("v.txt")],
+                stringvarlists: vec![dir.join("s.txt")],
+                scripts: vec![dir.join("ibox.osc")],
+                ..Default::default()
+            });
+            assert!(p.errors.is_empty(), "{:?}", p.errors);
+            p
+        })
+        .clone()
 }
 
 fn press(vm: &mut Vm, p: &Program, st: &mut State, host: &mut NullHost, trig: &str, drag: &str) {
