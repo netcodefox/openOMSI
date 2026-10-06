@@ -1,0 +1,5 @@
+ibox_Zahleingabe
+ibox_StatuszeileMitte
+ibox_StatuszeileRechts
+ibox_delay
+ibox_hstverlauf

@@ -1,0 +1,17 @@
+ibox_taste_D1
+ibox_taste_D2
+ibox_taste_D3
+ibox_taste_D4
+ibox_taste_D5
+ibox_taste_D6
+ibox_taste_D7
+ibox_taste_D8
+ibox_taste_D9
+ibox_taste_D10
+ibox_taste_D11
+ibox_eingabe
+ibox_modus
+ibox_Route
+IBIS_LinieKurs
+ibox_routenindex
+ibox_PIN

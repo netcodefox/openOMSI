@@ -1,0 +1,86 @@
+{trigger:ibox_taste_D1}
+	1 (S.L.ibox_taste_D1)
+{end}
+{trigger:ibox_taste_D1_drag}
+	0 (S.L.ibox_taste_D1)
+{end}
+{trigger:ibox_taste_D2}
+	1 (S.L.ibox_taste_D2)
+{end}
+{trigger:ibox_taste_D2_drag}
+	0 (S.L.ibox_taste_D2)
+{end}
+{trigger:ibox_taste_D3}
+	1 (S.L.ibox_taste_D3)
+{end}
+{trigger:ibox_taste_D3_drag}
+	0 (S.L.ibox_taste_D3)
+{end}
+{trigger:ibox_taste_D11}
+	1 (S.L.ibox_taste_D11)
+{end}
+{trigger:ibox_taste_D11_drag}
+	0 (S.L.ibox_taste_D11)
+{end}
+{macro:clickspots_reset}
+	"" (S.$.ibox_StatuszeileMitte) (S.$.ibox_StatuszeileRechts) (S.$.ibox_Zahleingabe) (S.$.ibox_delay) (S.$.ibox_hstverlauf)
+{end}
+{macro:ibox_tastatur}
+(L.L.ibox_taste_D1) 1 =
+{if}
+	(L.L.ibox_eingabe) 10 * trunc (S.L.ibox_eingabe)
+	(L.L.ibox_eingabe) 1 + trunc (S.L.ibox_eingabe)
+{endif}
+(L.L.ibox_taste_D2) 1 =
+{if}
+	(L.L.ibox_eingabe) 10 * trunc (S.L.ibox_eingabe)
+	(L.L.ibox_eingabe) 2 + trunc (S.L.ibox_eingabe)
+{endif}
+(L.L.ibox_taste_D3) 1 =
+{if}
+	(L.L.ibox_eingabe) 10 * trunc (S.L.ibox_eingabe)
+	(L.L.ibox_eingabe) 3 + trunc (S.L.ibox_eingabe)
+{endif}
+(L.L.ibox_taste_D11) 1 =
+{if}
+	(L.L.ibox_eingabe) 10 * trunc (S.L.ibox_eingabe)
+{endif}
+(L.L.ibox_taste_D10) 1 =
+{if}
+	(L.L.ibox_eingabe) 10 / trunc (S.L.ibox_eingabe)
+	0 (S.L.ibox_taste_D10)
+{endif}
+'4 Ziffern Begrenzung
+(L.L.ibox_eingabe) 9999 >
+{if}
+	(L.L.ibox_eingabe) 10 / trunc (S.L.ibox_eingabe)
+{endif}
+{end}
+{macro:ibox_route_lookup}
+	(L.L.ibox_eingabe) s4 (S.L.ibox_Route)
+	(L.L.IBIS_LinieKurs) 100 * l4 + (M.V.GetRouteIndex) (S.L.ibox_routenindex)
+{end}
+{frame}
+	(M.L.clickspots_reset)
+	(L.L.ibox_modus) 2 =
+	{if}
+		(M.L.ibox_tastatur)
+		(L.L.ibox_eingabe) $IntToStr $length s0
+		"*" l0 $* (S.$.ibox_Zahleingabe)
+	{endif}
+	(L.L.ibox_modus) 7 =
+	{if}
+		(M.L.ibox_tastatur)
+		(L.L.ibox_eingabe) $IntToStr (S.$.ibox_Zahleingabe)
+	{endif}
+	(L.L.ibox_modus) 10 =
+	{if}
+		(M.L.ibox_tastatur)
+		(L.L.ibox_eingabe) (S.L.ibox_Route)
+		(L.L.ibox_eingabe) $IntToStr (S.$.ibox_Zahleingabe)
+	{endif}
+	(L.L.ibox_eingabe) 0 =
+	{if}
+		"" (S.$.ibox_Zahleingabe)
+	{endif}
+{end}

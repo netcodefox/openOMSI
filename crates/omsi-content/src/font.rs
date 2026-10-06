@@ -214,24 +214,50 @@ impl FontAtlas {
         // matrix hands over "   NORDSPITZE   @   BAUERNHOF    @NORDSP.BAUERNH. " for a
         // 512x128 texture whose meshes map the lines separately. Drawn as one line and
         // squeezed to fit, that came out as a row of unreadable dots.
+        //
+        // Lines stay top-aligned (Omsi.exe): IBIS/ibox listboxes build a tall `@`-separated
+        // string and map a fixed "selected row" mesh onto a band of that texture. Centring
+        // the block shifted every row, so the highlight sat one stop behind the announcement.
+        //
+        // When the natural block is taller than the texture (Aachen ibox `ibox_hstverlauf`:
+        // DIN height 56 × ~13 Fahrplan / ~17 Route lines into 550×600), the block is scaled
+        // vertically to fit. Clipping the bottom cut off the current stop that the white
+        // selection mesh samples at v≈0.82..1.0, so only ~3 names showed and the highlight
+        // was wrong.
+        //
+        // Route mode ends with `@@@` after the current stop (`iboxVerlaufRoute`). Those
+        // empty lines must not keep a slot after scale-to-fit: they would occupy the white
+        // UV band while the name sits just above it (v≈0.76..0.82). Drop trailing empty
+        // `@` segments so the last painted line lands at the bottom of the texture.
         if text.contains('@') {
             let lh = self.font.height.max(1) as u32;
-            let mut out = vec![0u8; (w * h * 4) as usize];
-            let lines: Vec<&str> = text.split('@').collect();
-            // the block of lines is centred vertically, like a single line is
-            let block = lh * lines.len() as u32;
-            let top = h.saturating_sub(block) / 2;
+            let mut lines: Vec<&str> = text.split('@').collect();
+            while lines.last().is_some_and(|l| l.is_empty()) {
+                lines.pop();
+            }
+            if lines.is_empty() {
+                return vec![0u8; (w * h * 4) as usize];
+            }
+            let natural_h = (lines.len() as u32).saturating_mul(lh).max(1);
+            let mut tall = vec![0u8; (w * natural_h * 4) as usize];
             for (i, line) in lines.iter().enumerate() {
-                let y0 = top + i as u32 * lh;
-                if y0 >= h {
-                    break;
-                }
-                let rows = lh.min(h - y0);
+                let y0 = i as u32 * lh;
                 let img = self.render_aligned(line, w, lh, full_color, rgb, align);
-                for y in 0..rows as usize {
+                for y in 0..lh as usize {
                     let src = y * w as usize * 4;
                     let dst = (y0 as usize + y) * w as usize * 4;
-                    out[dst..dst + w as usize * 4].copy_from_slice(&img[src..src + w as usize * 4]);
+                    tall[dst..dst + w as usize * 4].copy_from_slice(&img[src..src + w as usize * 4]);
+                }
+            }
+            let mut out = vec![0u8; (w * h * 4) as usize];
+            if natural_h <= h {
+                out[..tall.len()].copy_from_slice(&tall);
+            } else {
+                for y in 0..h as usize {
+                    let src_y = (y as u64 * natural_h as u64 / h as u64) as usize;
+                    let src = src_y * w as usize * 4;
+                    let dst = y * w as usize * 4;
+                    out[dst..dst + w as usize * 4].copy_from_slice(&tall[src..src + w as usize * 4]);
                 }
             }
             return out;
@@ -335,5 +361,114 @@ mod tests {
         assert_eq!(font.glyph(' '), None);
         // space_width should fall back to '0' width (8)
         assert_eq!(font.space_width(), 8);
+    }
+
+    /// `@` lines start at the top of the texture. An IBIS listbox maps its selection band
+    /// onto a fixed row; a centred block made that band show the previous stop.
+    #[test]
+    fn at_lines_are_drawn_from_the_top() {
+        let font = Font {
+            path: PathBuf::new(),
+            name: "List".into(),
+            bitmap: "list.bmp".into(),
+            alpha: "list_alpha.bmp".into(),
+            height: 8,
+            gap: 0,
+            chars: vec![FontChar { ch: 'X', x0: 0, x1: 4, y: 0 }],
+        };
+        let mut alpha = vec![0u8; 4 * 8 * 4];
+        for y in 0..8 {
+            for x in 0..4 {
+                let i = (y * 4 + x) * 4;
+                alpha[i] = 255;
+                alpha[i + 3] = 255;
+            }
+        }
+        let atlas = FontAtlas::new(font, 4, 8, alpha.clone(), alpha);
+        // two lines in a 32-high texture: first line must occupy y=0..8, not a centred band
+        let img = atlas.render_aligned("X@X", 8, 32, false, [255, 255, 255], TextAlign::default());
+        let opaque = |y: u32| (0..8u32).any(|x| img[((y * 8 + x) * 4 + 3) as usize] > 0);
+        assert!(opaque(0), "first @ line starts at the top");
+        assert!(opaque(8), "second @ line follows immediately");
+        assert!(!opaque(16), "no centred gap below the lines");
+        assert!(!opaque(24), "bottom of a tall list texture stays empty");
+    }
+
+    /// Aachen ibox `ibox_hstverlauf` is 600 px with DIN height 56; the Fahrplan string has
+    /// ~13 `@` lines (time+name for current and three ahead). Without scaling, the current
+    /// stop (bottom of the string, sampled by the white mesh at v≈0.82..1) was clipped off.
+    #[test]
+    fn tall_at_lists_scale_so_the_last_line_stays_in_the_texture() {
+        let font = Font {
+            path: PathBuf::new(),
+            name: "List".into(),
+            bitmap: "list.bmp".into(),
+            alpha: "list_alpha.bmp".into(),
+            height: 56,
+            gap: 0,
+            chars: vec![FontChar { ch: 'X', x0: 0, x1: 4, y: 0 }],
+        };
+        let mut alpha = vec![0u8; 4 * 56 * 4];
+        for y in 0..56 {
+            for x in 0..4 {
+                let i = (y * 4 + x) * 4;
+                alpha[i] = 255;
+                alpha[i + 3] = 255;
+            }
+        }
+        let atlas = FontAtlas::new(font, 4, 56, alpha.clone(), alpha);
+        // 13 lines like iboxVerlaufFahrplan: natural height 728 > 600
+        let text = "@X@X@@X@X@@X@X@@X@X@";
+        assert_eq!(text.split('@').count(), 13);
+        let img = atlas.render_aligned(text, 8, 600, false, [255, 255, 255], TextAlign::default());
+        let opaque = |y: u32| (0..8u32).any(|x| img[((y * 8 + x) * 4 + 3) as usize] > 0);
+        // white selection band of ibox_text_3weiss.o3d: v 0.819..1.0 → y ≈ 491..600
+        assert!(
+            (491..600).any(opaque),
+            "current-stop band at the bottom of the texture must stay painted"
+        );
+        // main list band v 0..0.82 → y 0..492 still has stop names (not only the bottom)
+        assert!(
+            (0..400).any(opaque),
+            "scaled block keeps earlier stops in the upper list band"
+        );
+        // after trimming the trailing empty `@`, the last painted line fills the bottom
+        assert!(opaque(580), "last content line sits near the texture bottom");
+    }
+
+    /// `iboxVerlaufRoute` pads with `@@@` after the current cabin stop. Those empty lines
+    /// must not claim the white UV band once the block is scaled into 600 px.
+    #[test]
+    fn route_list_trailing_empty_at_lines_do_not_steal_the_white_band() {
+        let font = Font {
+            path: PathBuf::new(),
+            name: "List".into(),
+            bitmap: "list.bmp".into(),
+            alpha: "list_alpha.bmp".into(),
+            height: 56,
+            gap: 0,
+            chars: vec![FontChar { ch: 'X', x0: 0, x1: 4, y: 0 }],
+        };
+        let mut alpha = vec![0u8; 4 * 56 * 4];
+        for y in 0..56 {
+            for x in 0..4 {
+                let i = (y * 4 + x) * 4;
+                alpha[i] = 255;
+                alpha[i + 3] = 255;
+            }
+        }
+        let atlas = FontAtlas::new(font, 4, 56, alpha.clone(), alpha);
+        // @@@@stop4@@@stop3@@@stop2@@@stop1@@@ — current stop is the last non-empty line
+        let text = "@@@@X@@@X@@@X@@@X@@@";
+        let img = atlas.render_aligned(text, 8, 600, false, [255, 255, 255], TextAlign::default());
+        let opaque = |y: u32| (0..8u32).any(|x| img[((y * 8 + x) * 4 + 3) as usize] > 0);
+        // Without trimming trailing empties, the current stop landed at y≈459..494 (mostly
+        // above the white mesh). It must sit well inside v 0.819..1.0.
+        assert!(opaque(560), "current stop must be inside the white selection band");
+        assert!(opaque(590), "current stop reaches the bottom of the white box");
+        assert!(
+            (100..450).any(opaque),
+            "earlier stops remain visible in the main list band"
+        );
     }
 }

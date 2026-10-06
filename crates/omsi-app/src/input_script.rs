@@ -9,7 +9,12 @@ pub(crate) fn is_game_action(name: &str) -> bool {
     name.starts_with("view_")
         || matches!(
             name.as_str(),
-            "sim_pause" | "screenshot" | "quicksave" | "toggel_mouse_ctrl" | "toggel_ctrler"
+            "sim_pause"
+                | "screenshot"
+                | "quicksave"
+                | "toggel_mouse_ctrl"
+                | "toggel_ctrler"
+                | "voice_radio"
         )
 }
 
@@ -758,7 +763,11 @@ impl App {
     }
 
     /// Is the bindable bus radio key (`voice_radio` in Controls) held right now?
+    /// Keyboard chord or a controller button bound to the same action (held while down).
     fn voice_radio_held(&self) -> bool {
+        if self.pad_voice_radio {
+            return true;
+        }
         let held = |a: KeyCode, b: KeyCode| self.keys.contains(&a) || self.keys.contains(&b);
         let chord = omsi_content::input::chord(
             held(KeyCode::ShiftLeft, KeyCode::ShiftRight),
@@ -1446,6 +1455,10 @@ impl App {
     /// from the last two positions, and fired only on movement it kept the speed of the last
     /// small move through a pause and swung shut when let go; the door scripts set their
     /// push once per trigger.
+    ///
+    /// The redraw path may inline this after `Player::tick` (field borrow of `player`); keep
+    /// the helper for any call site that does not already hold `self.player`.
+    #[allow(dead_code)] // inlined in `app_events` redraw while `player` is borrowed
     pub(crate) fn drag_frame(&mut self) {
         if !self.dragging {
             return;
