@@ -346,6 +346,12 @@ fn display_level(t: vec3<f32>) -> vec3<f32> {
     return x + 0.04 * smoothstep(vec3<f32>(0.0), vec3<f32>(0.08), x);
 }
 
+// How bright a cockpit screen or cab indicator may stay (`enh.led.z`). Exterior LED
+// destination panels keep `enh.led.x` instead.
+fn self_lit_k() -> f32 {
+    return max(enh.led.z, 0.05);
+}
+
 fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bool, eye: vec3<f32>) -> vec4<f32> {
     if (material.emissive.w > 1.5) {
         // a pane's film of water: drops, not the sliding texture (see `rain_glass`), each a
@@ -473,7 +479,11 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         // ago, dark at night. Brightened like a display by the metering (up to 1.6 in the
         // dark) it showed a street far brighter than the one through the windscreen.
         let lift = select(enh.exposure.y, min(enh.exposure.y, 1.0), material.params.y < 0.95);
-        let c = display_level(t) * lift;
+        // Cockpit screens (IBIS, ticket/html terminals, LCDs: `MaterialExtra::screen`) dim
+        // with the night so a white UI does not bleach and bloom over a dark dashboard;
+        // mirrors keep their picture as it is.
+        let night = select(1.0, self_lit_k(), material.flags.x > 0.5 && material.params.y >= 0.95);
+        let c = display_level(t) * lift * night;
         return vec4<f32>(c * aer.a + aer.rgb * pre, alpha);
     }
     let outside = weather_outside_n(in.world, safe_normal(in.normal), terrain, in.params2.w);
@@ -894,7 +904,18 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     let cabin_light = interior_lamps(in.world, n, in.params2.z);
     let cabin = sf.albedo * cabin_light * mix(1.0, ao, 0.85);
     var rgb = (direct + ambient + lamps) * pre + cabin;
-    var emit = tex.rgb * material.emissive.rgb * max(enh.exposure.z * 2.0, 0.8);
+    // o3d emissive (ibox ITCS boards, IBIS Monitor panels: often white). By day the 0.8
+    // floor shows the texture with its own contrast; at night exposure.z rises and the
+    // same multiply pushes light greys into the tone shoulder — a white keypad washes out.
+    let e = material.emissive.rgb;
+    let e_peak = max(e.r, max(e.g, e.b));
+    var emit = tex.rgb * e * max(enh.exposure.z * 2.0, 0.8);
+    if (e_peak > 0.5) {
+        let night = self_lit_k();
+        let target = display_level(tex.rgb * e) * enh.exposure.y * night;
+        // day (night≈1): leave emit alone; deep night: contrast-preserving level only
+        emit = mix(emit, max(target - rgb, vec3<f32>(0.0)), smoothstep(0.98, 0.55, night));
+    }
     // (the tile light map on the splines and [LightMapMapping] objects is the vanilla
     // path's: here the map's lamps light them, tinted from that map, as they light every
     // other surface - added on top it lit the roads twice, with a hard edge where a road
@@ -911,8 +932,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
             rgb = rgb + sf.albedo / PI * nm * enh.lights.y * 3.0 * pre;
         } else {
             // lit windows and signs; a switched lamp or display holds up against daylight
-            // as the self-illuminated materials do
-            emit = emit + nm * select(enh.exposure.z, max(enh.exposure.z * 2.0, 0.8), switched);
+            // as the self-illuminated materials do. From inside the cab the night scale
+            // pulls dashboard indicators down so they do not bloom over a dark panel.
+            let sw = max(enh.exposure.z * 2.0, 0.8) * mix(1.0, self_lit_k(), inside_vehicle(camera.cam_pos.xyz));
+            emit = emit + nm * select(enh.exposure.z, sw, switched);
         }
     }
     if (material.params2.x > 0.5 && !terrain) {
@@ -934,7 +957,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
             // it shows at night) went past the tone curve's knee and bleached its colours -
             // the Procity's red and blue gauges pink and lavender (#827). (An LED panel's
             // light map stays as it was: its dots are meant to burn above their colour.)
-            emit = emit + max(display_level(tex.rgb) * enh.exposure.y - rgb, vec3<f32>(0.0)) * w;
+            // Cockpit screens take the night scale so a white light-mapped terminal does
+            // not bleach; exterior light-mapped faces keep full lift.
+            let lift = display_level(tex.rgb) * enh.exposure.y * select(1.0, self_lit_k(), material.flags.x > 0.5);
+            emit = emit + max(lift - rgb, vec3<f32>(0.0)) * w;
         }
     }
     if (material.emissive.w < -1.5) {
@@ -949,8 +975,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         let lm_gate = select(1.0, clamp(in.params2.x, 0.0, 1.0), material.params2.x > 0.5);
         emit = emit + tex.rgb * enh.led.x * alpha * lm_gate * max(enh.exposure.z * 2.0, 0.8);
     } else if (material.emissive.w < -0.5) {
-        // a display's text (see MaterialExtra::display)
-        emit = emit + tex.rgb * 0.35 * max(enh.exposure.z * 2.0, 0.8);
+        // a display's text (see MaterialExtra::display): cockpit counters dim with the
+        // night when they are the bus's own screen; exterior route text keeps its level.
+        let k = select(1.0, self_lit_k(), material.flags.x > 0.5);
+        emit = emit + tex.rgb * 0.35 * max(enh.exposure.z * 2.0, 0.8) * k;
     }
     rgb = rgb + emit;
     if (enh.debug.x > 0.5) {

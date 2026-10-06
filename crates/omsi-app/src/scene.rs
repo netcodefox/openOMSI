@@ -12505,7 +12505,11 @@ impl World {
                     // `[matl_item]` variant keeps its materials here, not in `dyn_slots`:
                     // without the flags on this `extra` the K++ and Krueger panels showed
                     // their dots but never glowed.
-                    extra.screen = script_slot.is_some() || script_trans.is_some();
+                    // Strong o3d emissive is a painted cockpit monitor (Aachen ibox
+                    // `ITCS_Monitor.dds`, IBIS `Monitor.o3d`): same glow/FXAA treatment, and
+                    // at night the shader keeps its UI contrast (`self_lit_scale`).
+                    let self_lit_board = emissive.iter().any(|&c| c > 0.5);
+                    extra.screen = script_slot.is_some() || script_trans.is_some() || self_lit_board;
                     extra.led = script_trans.is_some() && lm_white(&ov);
                     if dirt_overlay {
                         extra.no_z_write = true;
@@ -12602,7 +12606,8 @@ impl World {
                         // (an item without a night map of its own keeps the plain one, lit
                         // the same way)
                         it_extra.night_switched = it_night.is_some();
-                        it_extra.screen = script_item.is_some() || it_script_trans.is_some();
+                        let self_lit_board = it_emissive.iter().any(|&c| c > 0.5);
+                        it_extra.screen = script_item.is_some() || it_script_trans.is_some() || self_lit_board;
                         // (the item's `\S:n`, or the one it inherits from its base, keeps it
                         // an LED panel: see `MaterialExtra::led`)
                         it_extra.led = it_script_trans.is_some() && if ov_item.iter().any(|o| o.lightmap.is_some()) { lm_white(ov_item) } else { lm_white(&ov) };

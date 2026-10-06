@@ -2277,6 +2277,7 @@ impl ApplicationHandler for App {
                         let mut tags = if self.settings.name_tags {
                             let voice = self.voice.as_ref();
                             let speaks = |name: &str, id: u32| voice.is_some_and(|v| v.speaks(name, id));
+                            let on_radio = |name: &str, id: u32| voice.is_some_and(|v| v.on_radio(name, id));
                             let rig = (self.settings.triple.enabled
                                 && !self.settings.vr_requested())
                             .then(|| {
@@ -2296,6 +2297,7 @@ impl ApplicationHandler for App {
                                         h,
                                         rig.as_ref(),
                                         &speaks,
+                                        &on_radio,
                                     )
                                 })
                                 .unwrap_or_default()

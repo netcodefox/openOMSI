@@ -1875,6 +1875,11 @@ impl Player {
             log::info!("mouse event {ev}");
             let plain = self.vehicle.trigger(&ev);
             self.repair_roller_blind(&ev);
+            // Momentary `[mouseevent]` buttons (Aachen ibox / ticket printer, #744) set a
+            // flag in the press trigger and clear it in `_drag` / `_off`. The frame script
+            // is what acts on the flag. Run that frame now, before the next redraw's
+            // `_drag` (or a quick `_off`) zeroes it and the click does nothing.
+            self.vehicle.update_scripts_only(0.0);
             self.pressed_mesh = Some(i);
             self.press_info = (plain, 0.0);
             self.auto_drag = None;
@@ -1889,6 +1894,7 @@ impl Player {
         log::info!("trailer mouse event {ev} (part {ti})");
         self.vehicle.trigger(&ev);
         self.repair_roller_blind(&ev);
+        self.vehicle.update_scripts_only(0.0);
         self.pressed_trailer_mesh = Some((ti, i));
         Some(i)
     }

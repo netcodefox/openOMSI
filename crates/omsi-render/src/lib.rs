@@ -211,6 +211,14 @@ const METER_BRIGHTEN: f32 = 0.8;
 /// The tone curve's contrast about mid grey by day and at night (see `tone_contrast`).
 const TONE_CONTRAST_DAY: f32 = 1.22;
 const TONE_CONTRAST_NIGHT: f32 = 0.94;
+/// How bright the bus's own screens and cab indicators stay in Enhanced as night deepens
+/// (see `self_lit_scale`): 1 by day, this fraction of that brightness on a dark night, so
+/// an IBIS or ticket terminal stays readable without bleaching white or blooming over the
+/// dashboard. `OMSI_SELF_LIT_NIGHT=day,night` overrides both ends.
+const SELF_LIT_DAY: f32 = 1.0;
+/// Night floor for cockpit self-lit boards (ibox / IBIS emissive monitors and script screens).
+/// Strong enough that white UI greys stay under the tone knee; day stays at `SELF_LIT_DAY`.
+const SELF_LIT_NIGHT: f32 = 0.32;
 /// How far night vision takes the colour out of a dark scene (post.wgsl `night_vision`).
 const NIGHT_VISION: f32 = 0.3;
 /// The sun's angular radius as drawn (a little larger than the real 0.27°).
@@ -906,10 +914,11 @@ pub struct MaterialExtra {
     /// by itself, as a lit matrix does, instead of taking only the light that reaches it
     /// under the bus's front overhang, where it was hardly readable by day.
     pub display: bool,
-    /// A screen the bus draws itself - a `[useTextTexture]` or `[useScriptTexture]` slot:
-    /// the IBIS, the matrix displays, the dashboard's LCDs. The enhanced picture's glow
-    /// and FXAA leave it alone (see `MASK_FORMAT`): FXAA took half the contrast out of
-    /// their letters and they read as blurred.
+    /// A screen the bus draws itself - a `[useTextTexture]` / `[useScriptTexture]` slot, or
+    /// a painted cockpit monitor with strong o3d emissive (ibox / IBIS boards). The enhanced
+    /// picture's glow and FXAA leave it alone (see `MASK_FORMAT`): FXAA took half the
+    /// contrast out of their letters and they read as blurred; at night emissive boards
+    /// also keep UI contrast via `self_lit_scale`.
     pub screen: bool,
     /// An LED matrix - a display whose lit dots are the `\S:n` script texture's
     /// (`[matl_transmap]`), the Krueger and K++ destination panels: the dots are the
@@ -6969,8 +6978,9 @@ impl Renderer {
             eye: eye_off.extend(0.0).to_array(),
             // x how bright an LED panel's dots burn (see `MaterialExtra::led`; the settings'
             // 16 levels give 0 = off .. 3.75), y whether the LED panels' `\S:n` masks keep
-            // their mip chain (0: at full resolution, the dots stay visible when small)
-            led: [lighting.led_glow, lighting.led_mips, 0.0, 0.0],
+            // their mip chain (0: at full resolution, the dots stay visible when small),
+            // z how bright the bus's own screens and cab indicators stay (`self_lit_scale`)
+            led: [lighting.led_glow, lighting.led_mips, self_lit_scale(log_exposure), 0.0],
             moon: lighting.moon_dir.normalize_or_zero().extend(MOON_RADIUS).to_array(),
             // (w of the first: the veil's optical depth, which the sky draws as the high
             // layer; of the second: how far the veil spreads the sun, which softens shadows)
@@ -11034,6 +11044,30 @@ fn tone_contrast(log_pre: f32) -> f32 {
     day + (night - day) * t
 }
 
+/// How bright the bus's own screens (`MaterialExtra::screen`: IBIS, ticket/html terminals,
+/// dashboard LCDs) and the cab's switched night-map indicators stay in the enhanced picture
+/// for a pre-exposure (natural log). By day they sit at photographic mid-tones so a display
+/// under the windscreen overhang stays readable; without pulling that down at night the same
+/// level bleaches a white ticket UI and blooms green IBIS halos over a dark dashboard.
+/// Exterior LED destination matrices (`led_glow`) are left alone. Daytime appearance is
+/// unchanged (`SELF_LIT_DAY`). `OMSI_SELF_LIT_NIGHT=day,night` overrides the ends (1 and 0.32
+/// by default).
+fn self_lit_scale(log_pre: f32) -> f32 {
+    static OVERRIDE: std::sync::OnceLock<Option<(f32, f32)>> = std::sync::OnceLock::new();
+    let (day, night) = OVERRIDE
+        .get_or_init(|| {
+            let v = omsi_cfg::env::var("OMSI_SELF_LIT_NIGHT").ok()?;
+            let mut it = v.split(',').map(|x| x.trim().parse::<f32>().ok());
+            Some((
+                it.next()??.clamp(0.0, 2.0),
+                it.next().flatten().unwrap_or(SELF_LIT_NIGHT).clamp(0.05, 2.0),
+            ))
+        })
+        .unwrap_or((SELF_LIT_DAY, SELF_LIT_NIGHT));
+    let t = atmosphere::smoothstep(2.0, 8.0, log_pre / std::f32::consts::LN_2);
+    day + (night - day) * t
+}
+
 /// How much of the sun the enhanced sky's cumulus lets through to the camera: the same
 /// cloud the sky shader draws (sky_enhanced.wgsl `cloud_base_shape`, `cloud_sigma`: the
 /// shape map's heaps cut by the cover, rounded with height, without the billows), its
@@ -14637,6 +14671,19 @@ mod tests {
         // a snow field metered 1.5 EV over the target is darkened by at most the cap
         let ev = ((m[1] - (m[1] + 1.5)) * m[0]).clamp(-m[2], m[3]);
         assert!(ev < 0.0 && ev >= -0.75, "{ev}");
+    }
+
+    #[test]
+    fn cockpit_screens_dim_at_night() {
+        // day (pre ≈ 1): full self-lit level so a display under the windscreen stays readable;
+        // night (pre hundreds): pulled down so IBIS/ticket UIs do not bleach or bloom
+        let day = self_lit_scale(1.0f32.ln());
+        let dusk = self_lit_scale(70.0f32.ln());
+        let night = self_lit_scale(500.0f32.ln());
+        assert!((day - SELF_LIT_DAY).abs() < 1e-3, "day {day}");
+        assert!(dusk < day && dusk > night, "dusk {dusk} day {day} night {night}");
+        assert!((night - SELF_LIT_NIGHT).abs() < 0.02, "night {night}");
+        assert!(night < 0.45, "night floor must leave headroom under the tone knee: {night}");
     }
 
     #[test]

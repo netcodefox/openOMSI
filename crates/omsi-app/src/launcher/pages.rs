@@ -1217,6 +1217,7 @@ fn known_action(a: &str) -> Option<String> {
         ("exit", "Quit"),
         ("chat_open", "Multiplayer: write in the chat"),
         ("chat_toggle", "Multiplayer: show / hide the chat"),
+        ("voice_radio", "Multiplayer: bus radio (hold)"),
         ("sim_pause", "Pause"),
         ("screenshot", "Screenshot"),
         ("quicksave", "Quicksave"),

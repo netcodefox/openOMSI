@@ -31,8 +31,9 @@ struct Enhanced {
     debug: vec4<f32>,
     // xyz where the sky cube is drawn from, relative to the camera
     eye: vec4<f32>,
-    // x how bright an LED panel's dots burn (0 = off), y whether the LED panels' `\S:n`
-    // masks keep their mip chain (0: at full resolution, the dots stay visible when small)
+    // x how bright an LED panel's dots burn (0 = off), y the LED panels' mip floor
+    // (`Lighting::led_mips`), z how bright the bus's own screens and cab indicators stay
+    // as night deepens (`self_lit_scale` in lib.rs: 1 by day, ~0.32 on a dark night)
     led: vec4<f32>,
     // xyz towards the moon, w its angular radius (rad)
     moon: vec4<f32>,
