@@ -912,9 +912,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     var emit = tex.rgb * e * max(enh.exposure.z * 2.0, 0.8);
     if (e_peak > 0.5) {
         let night = self_lit_k();
-        let target = display_level(tex.rgb * e) * enh.exposure.y * night;
+        // (`target` is reserved in WGSL)
+        let disp = display_level(tex.rgb * e) * enh.exposure.y * night;
         // day (night≈1): leave emit alone; deep night: contrast-preserving level only
-        emit = mix(emit, max(target - rgb, vec3<f32>(0.0)), smoothstep(0.98, 0.55, night));
+        emit = mix(emit, max(disp - rgb, vec3<f32>(0.0)), smoothstep(0.98, 0.55, night));
     }
     // (the tile light map on the splines and [LightMapMapping] objects is the vanilla
     // path's: here the map's lamps light them, tinted from that map, as they light every
